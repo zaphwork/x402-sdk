@@ -54,6 +54,12 @@ export class ZaphWorkClient {
     return this.keypair.publicKey.toBase58();
   }
 
+  /**
+   * Authenticate with ZaphWork using wallet
+   * 
+   * FIXED: Now uses sessionToken from response body (works in Node.js)
+   * Previously tried to read Set-Cookie header which doesn't work in Node.js
+   */
   async authenticate(): Promise<void> {
     try {
       const walletAddress = this.getAddress();
@@ -65,29 +71,25 @@ export class ZaphWorkClient {
         },
         body: JSON.stringify({
           walletAddress,
-          walletType: 'phantom',
+          walletType: 'external',
         }),
       });
 
       if (!connectResponse.ok) {
-        throw new AuthenticationError('Failed to connect wallet');
+        const error = await connectResponse.json() as { error?: string };
+        throw new AuthenticationError(error.error || 'Failed to connect wallet');
       }
 
-      const message = `Sign this message to authenticate with ZaphWork.\n\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
-      const messageBytes = new TextEncoder().encode(message);
-      const signature = nacl.sign.detached(messageBytes, this.keypair.secretKey);
-      const signatureBase58 = bs58.encode(signature);
-
-
-      const setCookie = connectResponse.headers.get('set-cookie');
-      if (setCookie) {
-        const match = setCookie.match(/session=([^;]+)/);
-        if (match) {
-          this.sessionCookie = match[1];
-        }
+      // Get session token from response body (works in Node.js)
+      const data = await connectResponse.json() as { sessionToken?: string };
+      
+      if (data.sessionToken) {
+        this.sessionCookie = data.sessionToken;
+        this.authenticated = true;
+        return;
       }
 
-      this.authenticated = true;
+      throw new AuthenticationError('No session token received from server');
     } catch (error) {
       if (error instanceof ZaphWorkError) {
         throw error;
