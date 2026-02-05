@@ -33,16 +33,15 @@ export class ZaphWorkClient {
   private network: 'devnet' | 'mainnet-beta';
   private sessionCookie?: string;
   private authenticated: boolean = false;
-  private useX402: boolean = false; // Use x402 payment protocol
-  private platformWallet?: string; // Platform wallet for x402 payments
+  private useX402: boolean = false;
+  private platformWallet?: string;
 
   constructor(config: ZaphWorkConfig) {
-    this.apiUrl = config.apiUrl.replace(/\/$/, ''); // Remove trailing slash
+    this.apiUrl = config.apiUrl.replace(/\/$/, '');
     this.network = config.network || 'devnet';
     this.useX402 = config.useX402 || false;
     this.platformWallet = config.platformWallet;
     
-    // Parse private key
     try {
       const secretKey = bs58.decode(config.privateKey);
       this.keypair = Keypair.fromSecretKey(secretKey);
@@ -51,21 +50,14 @@ export class ZaphWorkClient {
     }
   }
 
-  /**
-   * Get wallet address
-   */
   getAddress(): string {
     return this.keypair.publicKey.toBase58();
   }
 
-  /**
-   * Authenticate with ZaphWork using wallet signature
-   */
   async authenticate(): Promise<void> {
     try {
       const walletAddress = this.getAddress();
       
-      // Step 1: Connect wallet (creates user if doesn't exist)
       const connectResponse = await fetch(`${this.apiUrl}/api/auth/wallet/connect`, {
         method: 'POST',
         headers: {
@@ -73,7 +65,7 @@ export class ZaphWorkClient {
         },
         body: JSON.stringify({
           walletAddress,
-          walletType: 'phantom', // SDK acts like Phantom wallet
+          walletType: 'phantom',
         }),
       });
 
@@ -81,7 +73,6 @@ export class ZaphWorkClient {
         throw new AuthenticationError('Failed to connect wallet');
       }
 
-      // Step 2: Create session
       const message = `Sign this message to authenticate with ZaphWork.\n\nWallet: ${walletAddress}\nTimestamp: ${Date.now()}`;
       const messageBytes = new TextEncoder().encode(message);
       const signature = nacl.sign.detached(messageBytes, this.keypair.secretKey);
@@ -100,11 +91,10 @@ export class ZaphWorkClient {
       });
 
       if (!sessionResponse.ok) {
-        const error = await sessionResponse.json();
+        const error = await sessionResponse.json() as { error?: string };
         throw new AuthenticationError(error.error || 'Failed to create session');
       }
 
-      // Extract session cookie
       const setCookie = sessionResponse.headers.get('set-cookie');
       if (setCookie) {
         const match = setCookie.match(/session=([^;]+)/);
@@ -122,21 +112,16 @@ export class ZaphWorkClient {
     }
   }
 
-  /**
-   * Make authenticated API request
-   */
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    // Check if this is an x402 endpoint
     const isX402Endpoint = endpoint.startsWith('/api/x402/');
     
     if (isX402Endpoint && this.useX402) {
       return this.requestWithX402Payment(endpoint, options);
     }
 
-    // Regular session-based auth
     if (!this.authenticated) {
       await this.authenticate();
     }
@@ -156,28 +141,23 @@ export class ZaphWorkClient {
     });
 
     if (response.status === 401) {
-      // Session expired, re-authenticate
       this.authenticated = false;
       this.sessionCookie = undefined;
       return this.request(endpoint, options);
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      const error = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string };
       throw new ZaphWorkError(error.error || `Request failed: ${response.statusText}`, response.status);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
-  /**
-   * Make x402 payment and request
-   */
   private async requestWithX402Payment<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    // First, try without payment to get payment requirements
     const response = await fetch(`${this.apiUrl}${endpoint}`, {
       ...options,
       headers: {
@@ -187,13 +167,18 @@ export class ZaphWorkClient {
     });
 
     if (response.status === 402) {
-      // Payment required
-      const paymentInfo = await response.json();
+      const paymentInfo = await response.json() as {
+        payment: {
+          recipient: string;
+          amount: string;
+          currency: string;
+          network: string;
+          endpoint: string;
+        };
+      };
       
-      // Make payment
       const paymentProof = await this.makeX402Payment(paymentInfo.payment);
       
-      // Retry request with payment proof
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'x-payment-proof': JSON.stringify(paymentProof),
@@ -209,24 +194,21 @@ export class ZaphWorkClient {
       });
 
       if (!paidResponse.ok) {
-        const error = await paidResponse.json().catch(() => ({ error: 'Unknown error' }));
+        const error = await paidResponse.json().catch(() => ({ error: 'Unknown error' })) as { error?: string };
         throw new ZaphWorkError(error.error || `Request failed: ${paidResponse.statusText}`, paidResponse.status);
       }
 
-      return paidResponse.json();
+      return paidResponse.json() as Promise<T>;
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
+      const error = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string };
       throw new ZaphWorkError(error.error || `Request failed: ${response.statusText}`, response.status);
     }
 
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
-  /**
-   * Make x402 payment to platform wallet
-   */
   private async makeX402Payment(paymentInfo: {
     recipient: string;
     amount: string;
@@ -239,31 +221,14 @@ export class ZaphWorkClient {
     timestamp: number;
     endpoint: string;
   }> {
-    // TODO: Implement actual Solana payment transaction
-    // For now, this is a placeholder that would need to:
-    // 1. Create a USDC transfer transaction to recipient
-    // 2. Sign and send the transaction
-    // 3. Wait for confirmation
-    // 4. Return the transaction signature
-    
     throw new ZaphWorkError('x402 payment not yet implemented in SDK. Use regular session auth for now.');
   }
 
-  // ============================================
-  // WALLET OPERATIONS
-  // ============================================
-
-  /**
-   * Get wallet balance (SOL and USDC)
-   */
   async getBalance(): Promise<WalletBalance> {
     const response = await this.request<{ balance: WalletBalance }>('/api/wallet/balance');
     return response.balance;
   }
 
-  /**
-   * Claim devnet USDC from faucet (devnet only)
-   */
   async claimFaucet(): Promise<{ signature: string; amount: number }> {
     if (this.network !== 'devnet') {
       throw new ValidationError('Faucet is only available on devnet');
@@ -271,13 +236,6 @@ export class ZaphWorkClient {
     return this.request('/api/wallet/claim-usdc-dev', { method: 'POST' });
   }
 
-  // ============================================
-  // TASK OPERATIONS
-  // ============================================
-
-  /**
-   * List tasks
-   */
   async listTasks(params?: ListTasksParams): Promise<{ tasks: Task[]; count: number }> {
     const query = new URLSearchParams();
     if (params?.category) query.append('category', params.category);
@@ -289,17 +247,11 @@ export class ZaphWorkClient {
     return this.request(`/api/tasks${queryString ? `?${queryString}` : ''}`);
   }
 
-  /**
-   * Get task by ID
-   */
   async getTask(taskId: string): Promise<Task> {
     const response = await this.request<{ task: Task }>(`/api/tasks/${taskId}`);
     return response.task;
   }
 
-  /**
-   * Create a new task
-   */
   async createTask(params: CreateTaskParams): Promise<Task> {
     const endpoint = this.useX402 ? '/api/x402/tasks' : '/api/tasks/create';
     
@@ -318,10 +270,6 @@ export class ZaphWorkClient {
     return response.task;
   }
 
-  /**
-   * Create task via x402 protocol (requires payment per request)
-   * This uses /api/x402/tasks endpoint and marks task as x402-created
-   */
   async createTaskX402(params: CreateTaskParams): Promise<Task> {
     const response = await this.requestWithX402Payment<{ task: Task }>('/api/x402/tasks', {
       method: 'POST',
@@ -338,16 +286,10 @@ export class ZaphWorkClient {
     return response.task;
   }
 
-  /**
-   * Fund a task (creates escrow on blockchain)
-   */
   async fundTask(taskId: string): Promise<{ signature: string; escrowAddress: string }> {
     return this.request(`/api/tasks/${taskId}/fund`, { method: 'POST' });
   }
 
-  /**
-   * Apply to work on a task
-   */
   async applyToTask(taskId: string, message?: string): Promise<{ applicationId: string }> {
     return this.request('/api/tasks/apply', {
       method: 'POST',
@@ -355,18 +297,12 @@ export class ZaphWorkClient {
     });
   }
 
-  /**
-   * Approve a task application (as client)
-   */
   async approveApplication(applicationId: string): Promise<void> {
     await this.request(`/api/tasks/applications/${applicationId}/approve`, {
       method: 'POST',
     });
   }
 
-  /**
-   * Submit work for a task (as worker)
-   */
   async submitWork(params: SubmitWorkParams): Promise<void> {
     await this.request(`/api/tasks/${params.taskId}/submit`, {
       method: 'POST',
@@ -378,10 +314,6 @@ export class ZaphWorkClient {
     });
   }
 
-  /**
-   * Submit work via x402 protocol (requires payment per submission)
-   * This uses /api/x402/submissions endpoint
-   */
   async submitWorkX402(params: SubmitWorkParams): Promise<void> {
     await this.requestWithX402Payment('/api/x402/submissions', {
       method: 'POST',
@@ -394,16 +326,10 @@ export class ZaphWorkClient {
     });
   }
 
-  /**
-   * Approve submitted work (as client) - releases escrow payment
-   */
   async approveTask(taskId: string): Promise<{ signature: string }> {
     return this.request(`/api/tasks/${taskId}/approve`, { method: 'POST' });
   }
 
-  /**
-   * Reject submitted work (as client)
-   */
   async rejectTask(taskId: string, reason: string): Promise<void> {
     await this.request(`/api/tasks/${taskId}/reject`, {
       method: 'POST',
@@ -411,20 +337,10 @@ export class ZaphWorkClient {
     });
   }
 
-  /**
-   * Cancel a task and refund escrow (as client)
-   */
   async cancelTask(taskId: string): Promise<{ signature?: string }> {
     return this.request(`/api/tasks/${taskId}/cancel`, { method: 'POST' });
   }
 
-  // ============================================
-  // GIG OPERATIONS
-  // ============================================
-
-  /**
-   * List gigs
-   */
   async listGigs(params?: { category?: string; limit?: number }): Promise<{ gigs: Gig[]; count: number }> {
     const query = new URLSearchParams();
     if (params?.category) query.append('category', params.category);
@@ -434,17 +350,11 @@ export class ZaphWorkClient {
     return this.request(`/api/gigs${queryString ? `?${queryString}` : ''}`);
   }
 
-  /**
-   * Get gig by slug
-   */
   async getGig(slug: string): Promise<Gig> {
     const response = await this.request<{ gig: Gig }>(`/api/gigs/by-slug/${slug}`);
     return response.gig;
   }
 
-  /**
-   * Create a new gig (as worker)
-   */
   async createGig(params: CreateGigParams): Promise<Gig> {
     const response = await this.request<{ gig: Gig }>('/api/gigs/create', {
       method: 'POST',
@@ -460,9 +370,6 @@ export class ZaphWorkClient {
     return response.gig;
   }
 
-  /**
-   * Purchase a gig (as client) - creates order
-   */
   async purchaseGig(gigId: string): Promise<GigOrder> {
     const response = await this.request<{ order: GigOrder }>('/api/gigs/purchase', {
       method: 'POST',
@@ -471,16 +378,10 @@ export class ZaphWorkClient {
     return response.order;
   }
 
-  /**
-   * Fund a gig order (creates escrow)
-   */
   async fundGigOrder(orderId: string): Promise<{ signature: string; escrowAddress: string }> {
     return this.request(`/api/gigs/orders/${orderId}/fund`, { method: 'POST' });
   }
 
-  /**
-   * Deliver work for gig order (as worker)
-   */
   async deliverGigOrder(orderId: string, deliveryUrl: string, notes?: string): Promise<void> {
     await this.request(`/api/gigs/orders/${orderId}/deliver`, {
       method: 'POST',
@@ -488,16 +389,10 @@ export class ZaphWorkClient {
     });
   }
 
-  /**
-   * Approve gig delivery (as client) - releases payment
-   */
   async approveGigOrder(orderId: string): Promise<{ signature: string }> {
     return this.request(`/api/gigs/orders/${orderId}/approve`, { method: 'POST' });
   }
 
-  /**
-   * Request revision for gig order (as client)
-   */
   async requestGigRevision(orderId: string, feedback: string): Promise<void> {
     await this.request(`/api/gigs/orders/${orderId}/revision`, {
       method: 'POST',
@@ -505,13 +400,6 @@ export class ZaphWorkClient {
     });
   }
 
-  // ============================================
-  // UTILITY METHODS
-  // ============================================
-
-  /**
-   * Wait for task to reach a specific status
-   */
   async waitForTaskStatus(
     taskId: string,
     targetStatus: Task['status'],
@@ -531,9 +419,6 @@ export class ZaphWorkClient {
     throw new ZaphWorkError(`Timeout waiting for task ${taskId} to reach status ${targetStatus}`);
   }
 
-  /**
-   * Complete full task flow (create, fund, apply, approve application)
-   */
   async createAndFundTask(params: CreateTaskParams): Promise<{ task: Task; escrowAddress: string }> {
     const task = await this.createTask(params);
     const { escrowAddress } = await this.fundTask(task.id);
