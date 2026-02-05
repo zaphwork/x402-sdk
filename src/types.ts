@@ -75,7 +75,10 @@ export interface Job {
 export interface WalletBalance {
   sol: number;
   usdc: number;
-  address: string;
+  usdcDev?: number; // USDC-Dev balance on devnet
+  solUsd?: number;
+  totalUsd?: number;
+  address?: string;
 }
 
 export interface CreateTaskParams {

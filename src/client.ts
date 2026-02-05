@@ -211,8 +211,8 @@ export class ZaphWorkClient {
   }
 
   async getBalance(): Promise<WalletBalance> {
-    const response = await this.request<{ balance: WalletBalance }>('/api/wallet/balance');
-    return response.balance;
+    const response = await this.request<{ balances: WalletBalance }>('/api/wallet/balance');
+    return response.balances;
   }
 
   async claimFaucet(): Promise<{ signature: string; amount: number }> {
@@ -279,7 +279,7 @@ export class ZaphWorkClient {
   async applyToTask(taskId: string, message?: string): Promise<{ applicationId: string }> {
     return this.request('/api/tasks/apply', {
       method: 'POST',
-      body: JSON.stringify({ task_id: taskId, message }),
+      body: JSON.stringify({ taskId: taskId, message }),
     });
   }
 
