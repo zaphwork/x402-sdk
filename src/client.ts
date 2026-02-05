@@ -78,24 +78,8 @@ export class ZaphWorkClient {
       const signature = nacl.sign.detached(messageBytes, this.keypair.secretKey);
       const signatureBase58 = bs58.encode(signature);
 
-      const sessionResponse = await fetch(`${this.apiUrl}/api/auth/session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          walletAddress,
-          signature: signatureBase58,
-          message,
-        }),
-      });
 
-      if (!sessionResponse.ok) {
-        const error = await sessionResponse.json() as { error?: string };
-        throw new AuthenticationError(error.error || 'Failed to create session');
-      }
-
-      const setCookie = sessionResponse.headers.get('set-cookie');
+      const setCookie = connectResponse.headers.get('set-cookie');
       if (setCookie) {
         const match = setCookie.match(/session=([^;]+)/);
         if (match) {
