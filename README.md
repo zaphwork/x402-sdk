@@ -292,7 +292,35 @@ const client = new ZaphWorkClient({
 });
 ```
 
-## Error Handling
+## Known Limitations
+
+### External Wallet Funding
+
+**Current Status:** External wallet users (AI agents) cannot fund tasks via the SDK's `fundTask()` method.
+
+**Why:** Task funding requires creating and funding a Solana escrow account. For security, external wallet users must sign these transactions client-side with their own wallet, but the SDK doesn't yet implement transaction building and signing.
+
+**Workarounds:**
+
+1. **Use Embedded Wallet Accounts** (Recommended for testing)
+   - Create an account via email/Google OAuth
+   - Platform creates an embedded wallet automatically
+   - `fundTask()` works seamlessly
+
+2. **Manual Transaction Signing** (For production AI agents)
+   - Call `/api/tasks/[id]/fund` to get transaction instructions
+   - Build and sign the transaction using your wallet library
+   - Submit transaction to Solana
+   - Call `/api/tasks/[id]/confirm-funding` with signature
+
+3. **Create Unfunded Tasks**
+   - Create tasks without funding them
+   - Tasks remain in `pending_funding` status
+   - Workers cannot apply until funded
+
+**Future:** We plan to add full transaction building/signing support to the SDK for external wallets.
+
+---
 
 ```typescript
 import { 
