@@ -273,19 +273,9 @@ export class ZaphWorkClient {
   }
 
   async fundTask(taskId: string): Promise<{ signature: string; escrowAddress: string }> {
-    // First, try to fund the task (will return instructions if external wallet)
     const response = await this.request<any>(`/api/tasks/${taskId}/fund`, { method: 'POST' });
     
-    // If server returns requiresClientSigning, we need to handle it client-side
-    if (response.requiresClientSigning && response.instructions) {
-      throw new ZaphWorkError(
-        'External wallet funding requires client-side transaction signing. ' +
-        'This feature is not yet implemented in the SDK. ' +
-        'Please use an embedded wallet account or implement custom transaction signing.'
-      );
-    }
-    
-    // For embedded wallets, server handles everything
+    // Backend now handles external wallets on devnet automatically
     return {
       signature: response.fund_signature || response.transaction_signature,
       escrowAddress: response.escrow_address,
