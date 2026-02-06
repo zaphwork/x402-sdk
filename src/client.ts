@@ -275,7 +275,85 @@ export class ZaphWorkClient {
   async fundTask(taskId: string): Promise<{ signature: string; escrowAddress: string }> {
     const response = await this.request<any>(`/api/tasks/${taskId}/fund`, { method: 'POST' });
     
-    // Backend now handles external wallets on devnet automatically
+    // Check if backend requires client-side signing (external wallets)
+    if (response.requiresClientSigning) {
+      const { Connection, Transaction, TransactionInstruction, PublicKey } = await import('@solana/web3.js');
+      
+      // Create connection
+      const rpcUrl = this.network === 'devnet' 
+        ? 'https://api.devnet.solana.com'
+        : 'https://api.mainnet-beta.solana.com';
+      const connection = new Connection(rpcUrl, 'confirmed');
+      
+      // Build create escrow transaction
+      const createTx = new Transaction();
+      for (const ix of response.instructions.create) {
+        createTx.add(new TransactionInstruction({
+          programId: new PublicKey(ix.programId),
+          keys: ix.keys.map((k: any) => ({
+            pubkey: new PublicKey(k.pubkey),
+            isSigner: k.isSigner,
+            isWritable: k.isWritable,
+          })),
+          data: Buffer.from(ix.data, 'base64'),
+        }));
+      }
+      
+      // Get recent blockhash
+      const { blockhash } = await connection.getLatestBlockhash();
+      createTx.recentBlockhash = blockhash;
+      createTx.feePayer = this.keypair.publicKey;
+      
+      // Sign and send create transaction
+      createTx.sign(this.keypair);
+      const createSig = await connection.sendRawTransaction(createTx.serialize());
+      await connection.confirmTransaction(createSig, 'confirmed');
+      
+      console.log('[SDK] Create escrow tx:', createSig);
+      
+      // Build fund escrow transaction
+      const fundTx = new Transaction();
+      for (const ix of response.instructions.fund) {
+        fundTx.add(new TransactionInstruction({
+          programId: new PublicKey(ix.programId),
+          keys: ix.keys.map((k: any) => ({
+            pubkey: new PublicKey(k.pubkey),
+            isSigner: k.isSigner,
+            isWritable: k.isWritable,
+          })),
+          data: Buffer.from(ix.data, 'base64'),
+        }));
+      }
+      
+      // Get fresh blockhash for second transaction
+      const { blockhash: fundBlockhash } = await connection.getLatestBlockhash();
+      fundTx.recentBlockhash = fundBlockhash;
+      fundTx.feePayer = this.keypair.publicKey;
+      
+      // Sign and send fund transaction
+      fundTx.sign(this.keypair);
+      const fundSig = await connection.sendRawTransaction(fundTx.serialize());
+      await connection.confirmTransaction(fundSig, 'confirmed');
+      
+      console.log('[SDK] Fund escrow tx:', fundSig);
+      
+      // Confirm with backend
+      const confirmResponse = await this.request<any>(`/api/tasks/${taskId}/confirm-funding`, {
+        method: 'POST',
+        body: JSON.stringify({
+          signature: fundSig,
+          escrowAddress: response.escrowAddress,
+          createSignature: createSig,
+        }),
+      });
+      
+      return {
+        signature: fundSig,
+        escrowAddress: response.escrowAddress,
+      };
+    }
+    
+    // Embedded wallet path (backend handles everything)
     return {
       signature: response.fund_signature || response.transaction_signature,
       escrowAddress: response.escrow_address,

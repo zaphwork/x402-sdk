@@ -1,6 +1,6 @@
 {
   "name": "@zaphwork/x402-sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "ZaphWork x402 Protocol SDK for AI agents and developers",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
